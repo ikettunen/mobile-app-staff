@@ -1,6 +1,8 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:nurse_app/features/visits/domain/entities/visit.dart';
+import 'package:nurse_app/features/visits/domain/entities/visit.dart' as domain;
+import '../../../../services/api_service.dart';
+import '../../../../main.dart';
 
 // Events
 abstract class VisitEvent extends Equatable {
@@ -19,8 +21,12 @@ class LoadVisits extends VisitEvent {
   List<Object?> get props => [patientId];
 }
 
+class LoadAllVisits extends VisitEvent {
+  const LoadAllVisits();
+}
+
 class CreateVisit extends VisitEvent {
-  final Visit visit;
+  final domain.Visit visit;
   
   const CreateVisit(this.visit);
   
@@ -29,7 +35,7 @@ class CreateVisit extends VisitEvent {
 }
 
 class UpdateVisit extends VisitEvent {
-  final Visit visit;
+  final domain.Visit visit;
   
   const UpdateVisit(this.visit);
   
@@ -50,7 +56,7 @@ class VisitInitial extends VisitState {}
 class VisitLoading extends VisitState {}
 
 class VisitLoaded extends VisitState {
-  final List<Visit> visits;
+  final List<domain.Visit> visits;
   
   const VisitLoaded(this.visits);
   
@@ -69,8 +75,11 @@ class VisitError extends VisitState {
 
 // BLoC
 class VisitBloc extends Bloc<VisitEvent, VisitState> {
+  final ApiService _apiService = ApiService();
+
   VisitBloc() : super(VisitInitial()) {
     on<LoadVisits>(_onLoadVisits);
+    on<LoadAllVisits>(_onLoadAllVisits);
     on<CreateVisit>(_onCreateVisit);
     on<UpdateVisit>(_onUpdateVisit);
   }
@@ -78,11 +87,90 @@ class VisitBloc extends Bloc<VisitEvent, VisitState> {
   void _onLoadVisits(LoadVisits event, Emitter<VisitState> emit) async {
     emit(VisitLoading());
     try {
-      // TODO: Implement API call to load visits
-      await Future.delayed(const Duration(seconds: 1)); // Simulate API call
-      emit(const VisitLoaded([]));
+      logger.i('Loading visits from API...');
+      final apiVisits = await _apiService.getTodaysVisits();
+      
+      // Convert API visits to domain visits
+      final domainVisits = apiVisits.map((apiVisit) => domain.Visit(
+        id: apiVisit.id,
+        patientId: apiVisit.patientId,
+        patientName: apiVisit.patientName ?? 'Unknown Patient',
+        nurseId: apiVisit.nurseId ?? '',
+        nurseName: apiVisit.nurseName ?? '',
+        status: _mapApiStatusToVisitStatus(apiVisit.status),
+        scheduledTime: apiVisit.scheduledTime ?? DateTime.now(),
+        startTime: apiVisit.startTime,
+        endTime: apiVisit.endTime,
+        location: apiVisit.location,
+        notes: apiVisit.notes,
+        taskCompletions: const [],
+        vitalSigns: null,
+        audioRecordingPath: null,
+        hasAudioRecording: false,
+        photos: const [],
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      )).toList();
+      
+      logger.i('Loaded ${domainVisits.length} visits');
+      emit(VisitLoaded(domainVisits));
     } catch (e) {
+      logger.e('Error loading visits: $e');
       emit(VisitError('Failed to load visits: $e'));
+    }
+  }
+
+  void _onLoadAllVisits(LoadAllVisits event, Emitter<VisitState> emit) async {
+    emit(VisitLoading());
+    try {
+      logger.i('VisitBloc: Starting to load all visits from API...');
+      final apiVisits = await _apiService.getTodaysVisits();
+      logger.i('VisitBloc: Received ${apiVisits.length} visits from API service');
+      
+      // Convert API visits to domain visits
+      final domainVisits = apiVisits.map((apiVisit) => domain.Visit(
+        id: apiVisit.id,
+        patientId: apiVisit.patientId,
+        patientName: apiVisit.patientName ?? 'Unknown Patient',
+        nurseId: apiVisit.nurseId ?? '',
+        nurseName: apiVisit.nurseName ?? '',
+        status: _mapApiStatusToVisitStatus(apiVisit.status),
+        scheduledTime: apiVisit.scheduledTime ?? DateTime.now(),
+        startTime: apiVisit.startTime,
+        endTime: apiVisit.endTime,
+        location: apiVisit.location,
+        notes: apiVisit.notes,
+        taskCompletions: const [],
+        vitalSigns: null,
+        audioRecordingPath: null,
+        hasAudioRecording: false,
+        photos: const [],
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      )).toList();
+      
+      logger.i('VisitBloc: Successfully converted to ${domainVisits.length} domain visits');
+      logger.i('VisitBloc: Emitting VisitLoaded state with visits');
+      emit(VisitLoaded(domainVisits));
+    } catch (e) {
+      logger.e('VisitBloc: Error loading visits: $e');
+      emit(VisitError('Failed to load visits: $e'));
+    }
+  }
+
+  domain.VisitStatus _mapApiStatusToVisitStatus(String apiStatus) {
+    switch (apiStatus.toLowerCase()) {
+      case 'planned':
+        return domain.VisitStatus.planned;
+      case 'in-progress':
+        return domain.VisitStatus.inProgress;
+      case 'finished':
+      case 'completed':
+        return domain.VisitStatus.completed;
+      case 'cancelled':
+        return domain.VisitStatus.cancelled;
+      default:
+        return domain.VisitStatus.planned;
     }
   }
 

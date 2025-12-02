@@ -2,6 +2,7 @@ import 'package:nurse_app/features/auth/presentation/bloc/auth_bloc.dart';
 import 'package:nurse_app/features/patients/presentation/bloc/patient_list_bloc.dart';
 import 'package:nurse_app/features/tasks/presentation/bloc/task_bloc.dart';
 import 'package:nurse_app/features/visits/presentation/bloc/visit_bloc.dart';
+import 'package:nurse_app/services/api_service.dart';
 
 class ServiceLocator {
   static final ServiceLocator _instance = ServiceLocator._internal();
@@ -17,7 +18,7 @@ class ServiceLocator {
   // Getters for BLoCs
   AuthBloc get authBloc => _authBloc ??= AuthBloc();
   PatientListBloc get patientListBloc => _patientListBloc ??= PatientListBloc();
-  TaskBloc get taskBloc => _taskBloc ??= TaskBloc();
+  TaskBloc get taskBloc => _taskBloc ??= TaskBloc(ApiService());
   VisitBloc get visitBloc => _visitBloc ??= VisitBloc();
 
   // Cleanup method

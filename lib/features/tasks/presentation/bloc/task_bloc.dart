@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:nurse_app/features/tasks/domain/entities/task.dart';
+import 'package:nurse_app/services/api_service.dart';
 
 // Events
 abstract class TaskEvent extends Equatable {
@@ -69,7 +70,9 @@ class TaskError extends TaskState {
 
 // BLoC
 class TaskBloc extends Bloc<TaskEvent, TaskState> {
-  TaskBloc() : super(TaskInitial()) {
+  final ApiService _apiService;
+  
+  TaskBloc(this._apiService) : super(TaskInitial()) {
     on<LoadTasks>(_onLoadTasks);
     on<CompleteTask>(_onCompleteTask);
     on<UpdateTask>(_onUpdateTask);
@@ -78,11 +81,41 @@ class TaskBloc extends Bloc<TaskEvent, TaskState> {
   void _onLoadTasks(LoadTasks event, Emitter<TaskState> emit) async {
     emit(TaskLoading());
     try {
-      // TODO: Implement API call to load tasks
-      await Future.delayed(const Duration(seconds: 1)); // Simulate API call
-      emit(const TaskLoaded([]));
+      final taskItems = await _apiService.getAllTasks();
+      
+      // Convert TaskItem to Task entity
+      final tasks = taskItems.map((item) => Task(
+        id: item.taskId,
+        title: item.taskTitle,
+        description: item.notes ?? '${item.taskCategory} - ${item.patientName ?? "Unknown"}',
+        status: item.completed ? TaskStatus.completed : TaskStatus.pending,
+        priority: _parsePriority(item.priority),
+        dueDate: item.scheduledTime ?? DateTime.now(),
+        patientId: item.patientId ?? '',
+        patientName: item.patientName ?? 'Unknown Patient',
+        assignedTo: '',
+        categories: [item.taskCategory],
+        completedAt: item.completedAt,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      )).toList();
+      
+      emit(TaskLoaded(tasks));
     } catch (e) {
       emit(TaskError('Failed to load tasks: $e'));
+    }
+  }
+  
+  TaskPriority _parsePriority(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return TaskPriority.high;
+      case 'medium':
+        return TaskPriority.medium;
+      case 'low':
+        return TaskPriority.low;
+      default:
+        return TaskPriority.medium;
     }
   }
 

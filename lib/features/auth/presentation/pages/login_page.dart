@@ -15,6 +15,10 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  // Mock credentials for demo
+  static const String _mockEmail = 'anna.virtanen@nursinghome.fi';
+  static const String _mockPassword = 'password123';
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -31,6 +35,13 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
     }
+  }
+
+  void _fillMockCredentials() {
+    setState(() {
+      _emailController.text = _mockEmail;
+      _passwordController.text = _mockPassword;
+    });
   }
 
   @override
@@ -120,6 +131,65 @@ class _LoginPageState extends State<LoginPage> {
                       }
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 16),
+                  // Demo credentials section
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline, 
+                              color: Colors.blue.shade700, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Demo Credentials',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Email: $_mockEmail',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue.shade600,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        Text(
+                          'Password: $_mockPassword',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue.shade600,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _fillMockCredentials,
+                            icon: const Icon(Icons.auto_fix_high, size: 16),
+                            label: const Text('Use Demo Credentials'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.blue.shade700,
+                              side: BorderSide(color: Colors.blue.shade300),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 24),
                   BlocBuilder<AuthBloc, AuthState>(

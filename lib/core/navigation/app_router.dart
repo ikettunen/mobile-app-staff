@@ -5,7 +5,7 @@ import 'package:nurse_app/features/patients/presentation/pages/patient_detail_pa
 import 'package:nurse_app/features/patients/presentation/pages/patient_list_page.dart';
 import 'package:nurse_app/features/splash/presentation/pages/splash_page.dart';
 import 'package:nurse_app/features/tasks/presentation/pages/task_detail_page.dart';
-import 'package:nurse_app/features/tasks/presentation/pages/task_list_page.dart';
+import 'package:nurse_app/features/info/presentation/pages/info_page.dart';
 import 'package:nurse_app/features/visits/presentation/pages/visit_detail_page.dart';
 import 'package:nurse_app/features/visits/presentation/pages/visit_form_page.dart';
 
@@ -14,7 +14,7 @@ class AppRouter {
   static const String login = '/login';
   static const String home = '/home';
   static const String patientList = '/home/patients';
-  static const String taskList = '/home/tasks';
+  static const String info = '/home/info';
   static const String patientDetail = '/patient';
   static const String taskDetail = '/task';
   static const String visitForm = '/visit/new';
@@ -42,9 +42,9 @@ class AppRouter {
           builder: (_) => const PatientListPage(),
           settings: settings,
         );
-      case taskList:
+      case info:
         return MaterialPageRoute(
-          builder: (_) => const TaskListPage(),
+          builder: (_) => const InfoPage(),
           settings: settings,
         );
       case patientDetail:

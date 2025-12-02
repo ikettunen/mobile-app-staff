@@ -38,11 +38,12 @@ class AuthLoading extends AuthState {}
 class AuthAuthenticated extends AuthState {
   final String userId;
   final String email;
+  final String name;
   
-  const AuthAuthenticated(this.userId, this.email);
+  const AuthAuthenticated(this.userId, this.email, this.name);
   
   @override
-  List<Object?> get props => [userId, email];
+  List<Object?> get props => [userId, email, name];
 }
 
 class AuthUnauthenticated extends AuthState {}
@@ -58,6 +59,12 @@ class AuthError extends AuthState {
 
 // BLoC
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
+  // Mock credentials for demo
+  static const String _mockEmail = 'anna.virtanen@nursinghome.fi';
+  static const String _mockPassword = 'password123';
+  static const String _mockUserId = 'nurse_001';
+  static const String _mockUserName = 'Anna Virtanen';
+
   AuthBloc() : super(AuthInitial()) {
     on<CheckAuthStatus>(_onCheckAuthStatus);
     on<LoginRequested>(_onLoginRequested);
@@ -79,10 +86,16 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   void _onLoginRequested(LoginRequested event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      // TODO: Implement actual login
       await Future.delayed(const Duration(seconds: 1)); // Simulate API call
-      // For demo purposes, accept any email/password
-      emit(AuthAuthenticated('user123', event.email));
+      
+      // Check mock credentials
+      if (event.email == _mockEmail && event.password == _mockPassword) {
+        emit(AuthAuthenticated(_mockUserId, _mockEmail, _mockUserName));
+      } else {
+        // For demo purposes, also accept any email/password combination
+        // In production, this would be removed
+        emit(AuthAuthenticated('demo_user', event.email, 'Demo User'));
+      }
     } catch (e) {
       emit(AuthError('Failed to login: $e'));
     }

@@ -1,7 +1,5 @@
-import 'dart:io';
 import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:nurse_app/core/theme/app_theme.dart';
 
 class AudioRecordingSection extends StatefulWidget {
