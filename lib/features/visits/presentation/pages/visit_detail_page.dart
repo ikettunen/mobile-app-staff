@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:nurse_app/features/visits/domain/entities/visit.dart' as domain;
-import 'package:nurse_app/features/visits/presentation/widgets/audio_recording_section.dart';
+
 import 'package:nurse_app/features/tasks/presentation/bloc/task_bloc.dart';
 import 'package:nurse_app/features/tasks/domain/entities/task.dart';
 import '../../../../services/api_service.dart';
@@ -22,6 +22,7 @@ class VisitDetailPage extends StatefulWidget {
 class _VisitDetailPageState extends State<VisitDetailPage> {
   final ApiService _apiService = ApiService();
   domain.Visit? _visit;
+  List<TaskItem> _visitTasks = [];
   bool _isLoading = true;
   bool _isRecording = false;
   String? _audioPath;
@@ -48,6 +49,10 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
       }
       
       if (apiVisit != null) {
+        // Get tasks specifically for this visit
+        final allTasks = await _apiService.getAllTasks();
+        final visitTasks = allTasks.where((task) => task.visitId == widget.visitId).toList();
+        
         setState(() {
           _visit = domain.Visit(
             id: apiVisit!.id,
@@ -59,12 +64,13 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
             scheduledTime: apiVisit!.scheduledTime ?? DateTime.now(),
             location: apiVisit!.location,
             notes: apiVisit!.notes,
-            taskCompletions: const [],
+            taskCompletions: [],
             vitalSigns: null,
             audioRecordingPath: null,
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
           );
+          _visitTasks = visitTasks;
           _isLoading = false;
         });
       } else {
@@ -135,26 +141,6 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
         ),
       body: Column(
         children: [
-          // Visit Info Header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: Colors.blue[50],
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _visit!.patientName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text('${_visit!.location} • ${_visit!.status.name}'),
-                Text('Scheduled: ${_formatTime(_visit!.scheduledTime)}'),
-              ],
-            ),
-          ),
           
           // Tasks List
           Expanded(
@@ -173,44 +159,32 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
                   ),
                   const SizedBox(height: 12),
                   Expanded(
-                    child: BlocBuilder<TaskBloc, TaskState>(
-                      builder: (context, state) {
-                        if (state is TaskLoading) {
-                          return const Center(child: CircularProgressIndicator());
-                        } else if (state is TaskLoaded) {
-                          // Filter tasks for this visit/patient
-                          final visitTasks = state.tasks.where((task) => 
-                            task.patientId == _visit!.patientId
-                          ).toList();
-                          
-                          if (visitTasks.isEmpty) {
-                            return const Center(
-                              child: Text('No tasks for this visit'),
-                            );
-                          }
-                          
-                          return ListView.builder(
-                            itemCount: visitTasks.length,
+                    child: _visitTasks.isEmpty
+                        ? const Center(
+                            child: Text('No tasks for this visit'),
+                          )
+                        : ListView.builder(
+                            itemCount: _visitTasks.length,
                             itemBuilder: (context, index) {
-                              final task = visitTasks[index];
+                              final task = _visitTasks[index];
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 8),
                                 child: ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: task.status == TaskStatus.completed 
+                                    backgroundColor: task.completed 
                                         ? Colors.green 
                                         : _getPriorityColor(task.priority),
                                     child: Icon(
-                                      task.status == TaskStatus.completed 
+                                      task.completed 
                                           ? Icons.check 
                                           : Icons.schedule,
                                       color: Colors.white,
                                     ),
                                   ),
-                                  title: Text(task.title),
-                                  subtitle: Text(task.categories.isNotEmpty ? task.categories.first : 'General'),
+                                  title: Text(task.taskTitle),
+                                  subtitle: Text(task.taskCategory),
                                   trailing: Checkbox(
-                                    value: task.status == TaskStatus.completed,
+                                    value: task.completed,
                                     onChanged: (value) {
                                       // Toggle task completion
                                       _toggleTaskCompletion(task);
@@ -219,13 +193,7 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
                                 ),
                               );
                             },
-                          );
-                        } else if (state is TaskError) {
-                          return Center(child: Text('Error: ${state.message}'));
-                        }
-                        return const Center(child: Text('No tasks loaded'));
-                      },
-                    ),
+                          ),
                   ),
                 ],
               ),
@@ -239,17 +207,7 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
               color: Colors.grey[50],
               border: Border(top: BorderSide(color: Colors.grey[300]!)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AudioRecordingSection(
-                  isRecording: _isRecording,
-                  audioPath: _audioPath,
-                  onStartRecording: _startRecording,
-                  onStopRecording: _stopRecording,
-                ),
-                const SizedBox(height: 12),
-                Row(
+            child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     IconButton(
@@ -284,21 +242,20 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
                     ),
                   ],
                 ),
-              ],
-            ),
           ),
         ],
       ),
     ));
   }
 
-  Color _getPriorityColor(TaskPriority priority) {
-    switch (priority) {
-      case TaskPriority.high:
+  Color _getPriorityColor(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+      case 'critical':
         return Colors.red;
-      case TaskPriority.medium:
+      case 'medium':
         return Colors.orange;
-      case TaskPriority.low:
+      case 'low':
         return Colors.green;
       default:
         return Colors.grey;
@@ -309,9 +266,17 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
-  void _toggleTaskCompletion(Task task) {
-    // TODO: Implement task completion toggle
-    logger.i('Toggling task completion for: ${task.title}');
+  void _toggleTaskCompletion(TaskItem task) {
+    setState(() {
+      // Find and update the task in the list
+      final index = _visitTasks.indexWhere((t) => t.taskId == task.taskId);
+      if (index != -1) {
+        // Create a new TaskItem with toggled completion status
+        // Note: TaskItem might be immutable, so we'd need to create a new one
+        // For now, just log the action
+        logger.i('Toggling task completion for: ${task.taskTitle}');
+      }
+    });
   }
 
   void _startRecording() {

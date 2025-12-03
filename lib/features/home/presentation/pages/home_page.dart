@@ -4,6 +4,7 @@ import 'package:nurse_app/core/navigation/app_router.dart';
 import 'package:nurse_app/features/patients/presentation/pages/patient_list_page.dart';
 import 'package:nurse_app/features/patients/presentation/bloc/patient_list_bloc.dart';
 import 'package:nurse_app/features/info/presentation/pages/info_page.dart';
+import 'package:nurse_app/features/dashboard/presentation/pages/dashboard_page.dart';
 import 'package:nurse_app/features/visits/presentation/pages/visit_list_page.dart';
 import 'package:nurse_app/features/visits/presentation/bloc/visit_bloc.dart';
 import 'package:nurse_app/features/auth/presentation/bloc/auth_bloc.dart';
@@ -50,7 +51,45 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
               ),
+              centerTitle: false,
               actions: [
+                // Home button in the center-right area
+                Container(
+                  decoration: BoxDecoration(
+                    color: _currentIndex == 0 ? Colors.blue[600] : Colors.blue[100],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _currentIndex = 0; // Go to Patients tab (home)
+                      });
+                      // Show feedback
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Switched to Patients (Home)'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                    icon: Icon(
+                      Icons.home, 
+                      color: _currentIndex == 0 ? Colors.white : Colors.blue, 
+                      size: 20
+                    ),
+                    label: Text(
+                      'Home', 
+                      style: TextStyle(
+                        color: _currentIndex == 0 ? Colors.white : Colors.blue, 
+                        fontWeight: FontWeight.bold
+                      )
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'logout') {
@@ -87,10 +126,17 @@ class _HomePageState extends State<HomePage> {
             ),
             body: IndexedStack(
               index: _currentIndex,
-              children: const [
-                PatientListPage(),
-                VisitListPage(),
-                InfoPage(),
+              children: [
+                DashboardPage(
+                  onTabChange: (index) {
+                    setState(() {
+                      _currentIndex = index;
+                    });
+                  },
+                ),
+                const PatientListPage(),
+                const VisitListPage(),
+                const InfoPage(),
               ],
             ),
             bottomNavigationBar: BottomNavigationBar(
@@ -102,6 +148,10 @@ class _HomePageState extends State<HomePage> {
                 });
               },
               items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.dashboard),
+                  label: 'Home',
+                ),
                 BottomNavigationBarItem(
                   icon: Icon(Icons.people),
                   label: 'Patients',

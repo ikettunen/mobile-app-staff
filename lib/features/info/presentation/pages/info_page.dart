@@ -15,6 +15,8 @@ class _InfoPageState extends State<InfoPage> {
   final TextEditingController _searchController = TextEditingController();
   bool _isLoading = true;
   String _searchQuery = '';
+  String _currentUrl = '';
+  bool _isViewingTaskFile = false;
 
   // Base URL for our S3 bucket
   static const String baseUrl = 'https://nurse-task-guides-2024.s3.eu-north-1.amazonaws.com';
@@ -35,11 +37,15 @@ class _InfoPageState extends State<InfoPage> {
           onPageStarted: (String url) {
             setState(() {
               _isLoading = true;
+              _currentUrl = url;
+              _isViewingTaskFile = url.contains('.html') && !url.endsWith('index.html');
             });
           },
           onPageFinished: (String url) {
             setState(() {
               _isLoading = false;
+              _currentUrl = url;
+              _isViewingTaskFile = url.contains('.html') && !url.endsWith('index.html');
             });
           },
         ),
@@ -71,6 +77,12 @@ class _InfoPageState extends State<InfoPage> {
     }
   }
 
+  void _goBackToIndex() {
+    if (!kIsWeb && _controller != null) {
+      _controller!.loadRequest(Uri.parse('$baseUrl/index.html'));
+    }
+  }
+
   Future<void> _openInBrowser() async {
     final Uri url = Uri.parse('$baseUrl/index.html');
     if (await canLaunchUrl(url)) {
@@ -92,6 +104,13 @@ class _InfoPageState extends State<InfoPage> {
         backgroundColor: Colors.blue[50],
         foregroundColor: Colors.blue[800],
         elevation: 0,
+        leading: _isViewingTaskFile && !kIsWeb
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _goBackToIndex,
+                tooltip: 'Back to Instructions List',
+              )
+            : null,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Container(
