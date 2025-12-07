@@ -4,10 +4,12 @@ class AppConfig {
   static const String visitsApiUrl = 'http://localhost:3008/api';
   
   // AWS S3 Configuration
-  static const String awsRegion = 'YOUR_AWS_REGION';
-  static const String s3BucketName = 'YOUR_S3_BUCKET_NAME';
-  static const String awsAccessKeyId = 'YOUR_AWS_ACCESS_KEY_ID';
-  static const String awsSecretAccessKey = 'YOUR_AWS_SECRET_ACCESS_KEY';
+  static const String awsRegion = 'eu-north-1';
+  static const String s3BucketName = 'nursing-home-audio-recordings-20251124';
+  // AWS credentials should be configured on the backend, not in the mobile app
+  // The mobile app uses presigned URLs from the backend for S3 access
+  static const String awsAccessKeyId = ''; // Not used - backend handles S3 access
+  static const String awsSecretAccessKey = ''; // Not used - backend handles S3 access
   
   // S3 Access Configuration (choose one)
   static const String s3AccessPointAlias = 'sound-bucket-ap-xdntonpfnqeyswxmfztohndf17eareun1a-s3alias';

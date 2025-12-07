@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:nurse_app/features/visits/domain/entities/visit.dart' as domain;
@@ -5,6 +6,10 @@ import 'package:nurse_app/features/visits/domain/entities/visit.dart' as domain;
 import 'package:nurse_app/features/tasks/presentation/bloc/task_bloc.dart';
 import 'package:nurse_app/features/tasks/domain/entities/task.dart';
 import '../../../../services/api_service.dart';
+import '../../../../services/audio_recording_service.dart';
+import '../../../../services/photo_capture_service.dart';
+import '../../../../services/aws_s3_service.dart';
+import '../../../../services/auth_service.dart';
 import '../../../../main.dart';
 
 class VisitDetailPage extends StatefulWidget {
@@ -21,59 +26,98 @@ class VisitDetailPage extends StatefulWidget {
 
 class _VisitDetailPageState extends State<VisitDetailPage> {
   final ApiService _apiService = ApiService();
+  final AudioRecordingService _audioService = AudioRecordingService();
+  final PhotoCaptureService _photoService = PhotoCaptureService();
+  final AWSS3Service _s3Service = AWSS3Service();
+  final AuthService _authService = AuthService();
+  
   domain.Visit? _visit;
   List<TaskItem> _visitTasks = [];
   bool _isLoading = true;
-  bool _isRecording = false;
-  String? _audioPath;
+  bool _isUploading = false;
 
   @override
   void initState() {
     super.initState();
     _loadVisitDetails();
+    _initializeServices();
+  }
+
+  void _initializeServices() async {
+    // Initialize S3 service
+    _s3Service.initialize();
+    
+    // Initialize audio service
+    await _audioService.initialize();
+    
+    // Request photo permissions
+    await _photoService.requestPermissions();
+  }
+
+  @override
+  void dispose() {
+    _audioService.dispose();
+    super.dispose();
   }
 
   void _loadVisitDetails() async {
     try {
-      // Get visits from API service to find the specific visit
-      final apiVisits = await _apiService.getTodaysVisits();
-      Visit? apiVisit;
+      // Get all visits (not just today's) to find this specific visit
+      final response = await _apiService.dio.get('/visits', queryParameters: {
+        'limit': 1000, // Get more visits to ensure we find the one we need
+      });
       
-      try {
-        apiVisit = apiVisits.firstWhere(
-          (visit) => visit.id == widget.visitId,
-        );
-      } catch (e) {
-        // If visit not found, use the first visit as fallback or null
-        apiVisit = apiVisits.isNotEmpty ? apiVisits.first : null;
-      }
-      
-      if (apiVisit != null) {
-        // Get tasks specifically for this visit
-        final allTasks = await _apiService.getAllTasks();
-        final visitTasks = allTasks.where((task) => task.visitId == widget.visitId).toList();
+      if (response.statusCode == 200) {
+        final data = response.data;
+        final List<dynamic> visitsJson = data['data'] ?? [];
         
-        setState(() {
-          _visit = domain.Visit(
-            id: apiVisit!.id,
-            patientId: apiVisit!.patientId,
-            patientName: apiVisit!.patientName ?? 'Unknown Patient',
-            nurseId: apiVisit!.nurseId ?? '',
-            nurseName: apiVisit!.nurseName ?? '',
-            status: _mapApiStatusToVisitStatus(apiVisit!.status),
-            scheduledTime: apiVisit!.scheduledTime ?? DateTime.now(),
-            location: apiVisit!.location,
-            notes: apiVisit!.notes,
-            taskCompletions: [],
-            vitalSigns: null,
-            audioRecordingPath: null,
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          );
-          _visitTasks = visitTasks;
-          _isLoading = false;
-        });
+        // Find the specific visit
+        final visitJson = visitsJson.firstWhere(
+          (v) => v['_id'] == widget.visitId || v['id'] == widget.visitId,
+          orElse: () => null,
+        );
+        
+        if (visitJson != null) {
+          final apiVisit = Visit.fromJson(visitJson);
+          
+          // Extract tasks from taskCompletions array
+          final taskCompletions = visitJson['taskCompletions'] as List<dynamic>? ?? [];
+          final visitTasks = taskCompletions
+              .map((taskJson) => TaskItem.fromJson(taskJson, apiVisit))
+              .toList();
+          
+          logger.i('Loaded visit ${apiVisit.id} with ${visitTasks.length} tasks');
+        
+          setState(() {
+            _visit = domain.Visit(
+              id: apiVisit.id,
+              patientId: apiVisit.patientId,
+              patientName: apiVisit.patientName ?? 'Unknown Patient',
+              nurseId: apiVisit.nurseId ?? '',
+              nurseName: apiVisit.nurseName ?? '',
+              status: _mapApiStatusToVisitStatus(apiVisit.status),
+              scheduledTime: apiVisit.scheduledTime ?? DateTime.now(),
+              location: apiVisit.location,
+              notes: apiVisit.notes,
+              taskCompletions: [],
+              vitalSigns: null,
+              audioRecordingPath: null,
+              hasAudioRecording: false,
+              photos: const [],
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            );
+            _visitTasks = visitTasks;
+            _isLoading = false;
+          });
+        } else {
+          logger.w('Visit not found: ${widget.visitId}');
+          setState(() {
+            _isLoading = false;
+          });
+        }
       } else {
+        logger.e('Failed to load visits: ${response.statusCode}');
         setState(() {
           _isLoading = false;
         });
@@ -207,23 +251,41 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
               color: Colors.grey[50],
               border: Border(top: BorderSide(color: Colors.grey[300]!)),
             ),
-            child: Row(
+            child: Column(
+              children: [
+                if (_isUploading)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 12),
+                        Text('Uploading...'),
+                      ],
+                    ),
+                  ),
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     IconButton(
-                      onPressed: _startRecording,
+                      onPressed: _isUploading ? null : _toggleRecording,
                       icon: Icon(
-                        _isRecording ? Icons.stop : Icons.mic,
+                        _audioService.isRecording ? Icons.stop : Icons.mic,
                         size: 32,
                       ),
                       style: IconButton.styleFrom(
-                        backgroundColor: _isRecording ? Colors.red : Colors.blue,
+                        backgroundColor: _audioService.isRecording ? Colors.red : Colors.blue,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.all(16),
                       ),
                     ),
                     IconButton(
-                      onPressed: _takePhoto,
+                      onPressed: _isUploading ? null : _takePhoto,
                       icon: const Icon(Icons.camera_alt, size: 32),
                       style: IconButton.styleFrom(
                         backgroundColor: Colors.green,
@@ -242,6 +304,8 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
                     ),
                   ],
                 ),
+              ],
+            ),
           ),
         ],
       ),
@@ -266,47 +330,238 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
-  void _toggleTaskCompletion(TaskItem task) {
-    setState(() {
-      // Find and update the task in the list
-      final index = _visitTasks.indexWhere((t) => t.taskId == task.taskId);
-      if (index != -1) {
-        // Create a new TaskItem with toggled completion status
-        // Note: TaskItem might be immutable, so we'd need to create a new one
-        // For now, just log the action
-        logger.i('Toggling task completion for: ${task.taskTitle}');
+  void _toggleTaskCompletion(TaskItem task) async {
+    if (task.completed) {
+      // Task is already completed, show message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Task is already completed'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
-    });
-  }
+      return;
+    }
 
-  void _startRecording() {
-    if (_isRecording) {
-      // Stop recording
-      setState(() {
-        _isRecording = false;
-        _audioPath = 'path/to/recorded/audio.wav'; // Mock path
-      });
-      logger.i('Stopped audio recording');
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Complete Task'),
+        content: Text('Mark "${task.taskTitle}" as completed?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Complete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Get current staff info
+    final currentStaffId = _authService.currentUserId ?? 'unknown';
+    final currentUser = _authService.currentUser;
+    final staffName = currentUser != null 
+        ? '${currentUser['firstName'] ?? ''} ${currentUser['lastName'] ?? ''}'.trim()
+        : null;
+
+    // Call API to complete the task
+    final success = await _apiService.completeTask(
+      visitId: widget.visitId,
+      taskId: task.taskId,
+      staffId: currentStaffId,
+      staffName: staffName,
+      notes: 'Completed via mobile app',
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      // Reload visit details to get updated task status
+      _loadVisitDetails();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Task completed successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } else {
-      // Start recording
-      setState(() {
-        _isRecording = true;
-      });
-      logger.i('Started audio recording');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to complete task'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
-  void _stopRecording() {
-    setState(() {
-      _isRecording = false;
-      _audioPath = 'path/to/recorded/audio.wav'; // Mock path
-    });
-    logger.i('Stopped audio recording');
+  void _toggleRecording() async {
+    if (_audioService.isRecording) {
+      // Stop recording
+      final recordingPath = await _audioService.stopRecording();
+      final currentStaffId = _authService.currentUserId ?? 'staff-1001';
+      
+      if (recordingPath != null && _visit != null) {
+        // Check file size before upload
+        final fileSize = await _audioService.getFileSize(recordingPath);
+        logger.i('📊 Audio file size before upload: ${fileSize ?? 0} bytes');
+        
+        // Warn if file is too small (less than 1KB is likely empty or corrupted)
+        if (fileSize != null && fileSize < 1000) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Recording too short or empty. Please record for at least 2 seconds.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          // Delete the empty file
+          await _audioService.deleteRecording(recordingPath);
+          return;
+        }
+        
+        setState(() {
+          _isUploading = true;
+        });
+        
+        // Upload to S3
+        final s3Url = await _s3Service.uploadAudioRecording(
+          audioFile: File(recordingPath),
+          visitId: _visit!.id,
+          patientId: _visit!.patientId,
+          staffId: currentStaffId,
+        );
+        
+        setState(() {
+          _isUploading = false;
+        });
+        
+        if (s3Url != null) {
+          // Recording uploaded successfully
+          // The transcription Lambda will automatically process it and post to visit notes
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Audio recording uploaded successfully. Transcription will be added to notes in 1-5 minutes.'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+          
+          // Clean up local file
+          await _audioService.deleteRecording(recordingPath);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to upload audio recording'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      }
+    } else {
+      // Start recording
+      final currentStaffId = _authService.currentUserId ?? 'staff-1001';
+      
+      if (_visit != null) {
+        final success = await _audioService.startRecording(
+          visitId: _visit!.id,
+          staffId: currentStaffId,
+        );
+        
+        if (success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🎤 Recording... Speak now'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        } else if (!success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to start recording. Check microphone permissions.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+    setState(() {});
   }
 
-  void _takePhoto() {
-    logger.i('Taking photo');
-    // TODO: Implement photo capture
+  void _takePhoto() async {
+    final currentStaffId = _authService.currentUserId ?? 'staff-1001';
+    
+    if (_visit != null) {
+      setState(() {
+        _isUploading = true;
+      });
+      
+      final photoPath = await _photoService.takePhoto(
+        visitId: _visit!.id,
+        staffId: currentStaffId,
+      );
+      
+      if (photoPath != null) {
+        // Upload to S3
+        final s3Url = await _s3Service.uploadPhoto(
+          photoFile: File(photoPath),
+          visitId: _visit!.id,
+          patientId: _visit!.patientId,
+          staffId: currentStaffId,
+          photoIndex: 0,
+        );
+        
+        setState(() {
+          _isUploading = false;
+        });
+        
+        if (s3Url != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Photo uploaded successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          
+          // Clean up local file
+          await _photoService.deletePhoto(photoPath);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to upload photo'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } else {
+        setState(() {
+          _isUploading = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to take photo. Check camera permissions.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _writeNote() {
@@ -330,9 +585,6 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
 
   Widget _buildNoteEditor(ScrollController scrollController) {
     final TextEditingController noteController = TextEditingController();
-    if (_visit?.notes != null) {
-      noteController.text = _visit!.notes!;
-    }
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -343,7 +595,7 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Visit Notes',
+                'Add Visit Note',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -355,14 +607,51 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          
+          // Show existing notes if any
+          if (_visit?.notes != null && _visit!.notes!.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Previous Notes:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 150),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        _visit!.notes!,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          
+          // New note input
           Expanded(
             child: TextField(
               controller: noteController,
               maxLines: null,
               expands: true,
               decoration: const InputDecoration(
-                hintText: 'Write your visit notes here...',
+                hintText: 'Write your new note here...\n\nThis will be appended to existing notes.',
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.all(16),
               ),
@@ -374,10 +663,19 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-                _saveNote(noteController.text);
-                Navigator.pop(context);
+                if (noteController.text.trim().isNotEmpty) {
+                  _saveNote(noteController.text.trim());
+                  Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a note'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
               },
-              child: const Text('Save Note'),
+              child: const Text('Add Note'),
             ),
           ),
         ],
@@ -385,19 +683,45 @@ class _VisitDetailPageState extends State<VisitDetailPage> {
     );
   }
 
-  void _saveNote(String note) {
-    setState(() {
-      if (_visit != null) {
-        _visit = _visit!.copyWith(notes: note);
-      }
-    });
-    logger.i('Saved visit note: ${note.length} characters');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Note saved successfully'),
-        backgroundColor: Colors.green,
-      ),
+  void _saveNote(String noteText) async {
+    if (_visit == null) return;
+
+    // Get current staff info
+    final currentStaffId = _authService.currentUserId ?? 'unknown';
+    final currentUser = _authService.currentUser;
+    final staffName = currentUser != null 
+        ? '${currentUser['firstName'] ?? ''} ${currentUser['lastName'] ?? ''}'.trim()
+        : null;
+
+    // Call API to add note
+    final success = await _apiService.addNoteToVisit(
+      visitId: widget.visitId,
+      noteText: noteText,
+      staffId: currentStaffId,
+      staffName: staffName,
+      noteType: 'general',
     );
+
+    if (!mounted) return;
+
+    if (success) {
+      // Reload visit details to get updated notes
+      _loadVisitDetails();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Note added successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to add note'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _saveVisit() {

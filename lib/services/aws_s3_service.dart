@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/config/app_config.dart';
 import '../core/config/environment.dart';
 import '../main.dart';
+import 'auth_service.dart';
 
 class AWSS3Service {
   static final AWSS3Service _instance = AWSS3Service._internal();
@@ -12,6 +13,7 @@ class AWSS3Service {
   AWSS3Service._internal();
 
   Dio? _dio;
+  final AuthService _authService = AuthService();
 
   void initialize() {
     if (_dio != null) {
@@ -202,46 +204,181 @@ class AWSS3Service {
       }
       
       // Step 1: Get presigned URL from S3 service via API gateway
-      final presignedResponse = await _dio!.post('http://51.20.164.143:3001/api/uploads/presigned-url', data: {
-        'fileName': s3Key,
-        'contentType': 'audio/wav',
+      logger.i('=== REQUESTING PRESIGNED URL ===');
+      logger.i('S3 Key: $s3Key');
+      logger.i('Visit ID: $visitId');
+      logger.i('Patient ID: $patientId');
+      logger.i('Staff ID: $staffId');
+      
+      // Get auth headers from auth service
+      final authHeaders = _authService.getAuthHeaders();
+      logger.i('Auth headers: $authHeaders');
+      logger.i('Auth token present: ${_authService.currentToken != null}');
+      if (_authService.currentToken != null) {
+        logger.i('Token preview: ${_authService.currentToken!.substring(0, 20)}...');
+      }
+      
+      final requestUrl = 'http://51.20.164.143:3001/api/uploads/presigned-url';
+      // Extract just the filename from the S3 key
+      final fileName = s3Key.split('/').last;
+      
+      // Determine content type based on file extension
+      final contentType = fileName.toLowerCase().endsWith('.m4a') 
+          ? 'audio/mp4' 
+          : 'audio/wav';
+      
+      final requestData = {
+        'fileName': fileName,
+        'contentType': contentType,
         'visitId': visitId,
         'patientId': patientId,
-        'recordingSource': 'mobile_app',
-        'recordingType': 'visit_note',
         'staffId': staffId,
-      });
+        'recordingType': 'visit_note',
+        'recordingSource': 'mobile_app',
+        'description': 'Audio recording from mobile app',
+        'tags': ['mobile', 'audio', 'visit_note'],
+      };
+      
+      logger.i('=== REQUEST TO S3-BUCKET-SERVICE ===');
+      logger.i('URL: $requestUrl');
+      logger.i('Method: POST');
+      logger.i('Headers: $authHeaders');
+      logger.i('Request body: $requestData');
+      
+      final presignedResponse = await _dio!.post(requestUrl, 
+        data: requestData,
+        options: Options(headers: authHeaders),
+      );
+
+      logger.i('=== PRESIGNED URL RESPONSE ===');
+      logger.i('Status: ${presignedResponse.statusCode}');
+      logger.i('Headers: ${presignedResponse.headers}');
+      logger.i('Full response data: ${presignedResponse.data}');
 
       if (presignedResponse.statusCode != 200) {
-        throw Exception('Failed to get presigned URL');
+        logger.e('❌ FAILED TO GET PRESIGNED URL');
+        logger.e('Status: ${presignedResponse.statusCode}');
+        logger.e('Response body: ${presignedResponse.data}');
+        logger.e('Response type: ${presignedResponse.data.runtimeType}');
+        throw Exception('Failed to get presigned URL: ${presignedResponse.statusCode} - ${presignedResponse.data}');
       }
 
-      final presignedUrl = presignedResponse.data['data']['uploadUrl'];
-      final s3Url = presignedResponse.data['data']['fileUrl'];
-      final s3KeyResponse = presignedResponse.data['data']['s3Key'];
+      // Parse response data more carefully
+      final responseData = presignedResponse.data;
+      logger.i('Response data type: ${responseData.runtimeType}');
+      logger.i('Response keys: ${responseData.keys}');
+      
+      final dataSection = responseData['data'];
+      logger.i('Data section: $dataSection');
+      logger.i('Data section type: ${dataSection?.runtimeType}');
+      
+      if (dataSection == null) {
+        logger.e('No data section in response!');
+        throw Exception('Invalid response format - no data section');
+      }
+      
+      final presignedUrl = dataSection['uploadUrl'];
+      final s3Url = dataSection['fileUrl'];
+      final s3KeyResponse = dataSection['s3Key'];
+      
+      logger.i('=== EXTRACTED VALUES ===');
+      logger.i('Presigned URL: $presignedUrl');
+      logger.i('S3 URL: $s3Url');
+      logger.i('S3 Key: $s3KeyResponse');
+      
+      // Detailed region analysis
+      if (presignedUrl != null) {
+        logger.i('=== REGION ANALYSIS ===');
+        if (presignedUrl.contains('us-east-1')) {
+          logger.e('❌ ERROR: Presigned URL contains us-east-1!');
+          logger.e('Service config not updated or not restarted!');
+        } else if (presignedUrl.contains('eu-north-1')) {
+          logger.i('✅ SUCCESS: Presigned URL uses eu-north-1');
+        } else {
+          logger.w('⚠️ No region found in URL');
+        }
+        
+        // Extract hostname for more analysis
+        final uri = Uri.parse(presignedUrl);
+        logger.i('Hostname: ${uri.host}');
+        logger.i('Path: ${uri.path}');
+        logger.i('Query params: ${uri.queryParameters}');
+      } else {
+        logger.e('❌ Presigned URL is null!');
+        throw Exception('Presigned URL is null in response');
+      }
 
       // Step 2: Upload file to S3 using presigned URL
-      final formData = FormData.fromMap({
-        'file': await MultipartFile.fromFile(audioFile.path),
-      });
+      final bytes = await audioFile.readAsBytes();
+      logger.i('=== PREPARING S3 UPLOAD ===');
+      logger.i('File size: ${bytes.length} bytes');
+      logger.i('Upload URL: $presignedUrl');
+      
+      final uploadHeaders = {
+        'Content-Type': contentType,
+        'Content-Length': bytes.length.toString(),
+      };
+      logger.i('Upload headers: $uploadHeaders');
 
-      final uploadResponse = await _dio!.put(
-        presignedUrl,
-        data: formData,
-        options: Options(
-          headers: {
-            'Content-Type': 'audio/wav',
-          },
-        ),
-      );
+      logger.i('=== STARTING S3 UPLOAD ===');
+      
+      Response uploadResponse;
+      try {
+        uploadResponse = await _dio!.put(
+          presignedUrl,
+          data: bytes,
+          options: Options(headers: uploadHeaders),
+        );
+        
+        logger.i('=== S3 UPLOAD SUCCESS ===');
+        logger.i('Status: ${uploadResponse.statusCode}');
+        logger.i('Headers: ${uploadResponse.headers}');
+        logger.i('Data: ${uploadResponse.data}');
+        
+      } catch (e) {
+        logger.e('=== S3 UPLOAD FAILED ===');
+        if (e is DioException && e.response != null) {
+          final response = e.response!;
+          logger.e('Status: ${response.statusCode}');
+          logger.e('Status message: ${response.statusMessage}');
+          logger.e('Headers: ${response.headers}');
+          logger.e('Data: ${response.data}');
+          
+          if (response.statusCode == 301) {
+            logger.e('=== 301 REDIRECT ANALYSIS ===');
+            final location = response.headers['location']?.first;
+            logger.e('Location header: $location');
+            logger.e('This means the bucket is in a different region than expected');
+            logger.e('Original URL: $presignedUrl');
+            
+            if (location != null) {
+              logger.e('Redirect location: $location');
+              try {
+                final redirectUri = Uri.parse(location);
+                logger.e('Redirect hostname: ${redirectUri.host}');
+                logger.e('Redirect path: ${redirectUri.path}');
+              } catch (parseError) {
+                logger.e('Could not parse redirect location: $parseError');
+              }
+            }
+          }
+        }
+        
+        logger.e('Error type: ${e.runtimeType}');
+        logger.e('Error message: $e');
+        rethrow;
+      }
 
       if (uploadResponse.statusCode == 200 || uploadResponse.statusCode == 204) {
         // Step 3: Confirm upload with S3 service
-        await _dio!.post('http://51.20.164.143:3001/api/uploads/confirm', data: {
-          's3Key': s3KeyResponse,
-          'fileSize': audioFile.lengthSync(),
-          'uploadedBy': staffId,
-        });
+        await _dio!.post('http://51.20.164.143:3001/api/uploads/confirm', 
+          data: {
+            's3Key': s3KeyResponse,
+            'fileSize': audioFile.lengthSync(),
+            'uploadedBy': staffId,
+          },
+          options: Options(headers: _authService.getAuthHeaders()),
+        );
         
         logger.i('Audio recording uploaded successfully: $s3Url');
         return s3Url;
@@ -277,26 +414,47 @@ class AWSS3Service {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       final s3Key = AppConfig.getPhotoFilePath(visitId, staffId, timestamp, photoIndex);
       
-      logger.i('Uploading photo: $s3Key');
+      logger.i('=== PHOTO UPLOAD REQUEST ===');
+      logger.i('S3 Key: $s3Key');
+      logger.i('Visit ID: $visitId');
+      logger.i('Patient ID: $patientId');
+      logger.i('Staff ID: $staffId');
       
-      // Step 1: Get presigned URL from S3 service via API gateway
-      final presignedResponse = await _dio!.post('http://51.20.164.143:3001/api/uploads/presigned-url', data: {
-        'fileName': s3Key,
+      // Extract just the filename from the S3 key
+      final fileName = s3Key.split('/').last;
+      
+      final requestData = {
+        'fileName': fileName,
         'contentType': 'image/jpeg',
         'visitId': visitId,
         'patientId': patientId,
-        'recordingSource': 'mobile_app',
-        'recordingType': 'visit_photo',
+        'photoSource': 'mobile_app',  // Use photoSource for photos, not recordingSource
+        'photoType': 'general',        // Use photoType for photos, not recordingType
         'staffId': staffId,
-      });
+        'description': 'Photo from mobile app',
+        'tags': ['mobile', 'photo', 'visit'],
+      };
+      
+      logger.i('Request data: $requestData');
+      
+      // Step 1: Get presigned URL from S3 service via API gateway
+      final presignedResponse = await _dio!.post('http://51.20.164.143:3001/api/uploads/presigned-url', data: requestData);
+
+      logger.i('Response status: ${presignedResponse.statusCode}');
+      logger.i('Response data: ${presignedResponse.data}');
 
       if (presignedResponse.statusCode != 200) {
-        throw Exception('Failed to get presigned URL');
+        logger.e('❌ Presigned URL request failed');
+        logger.e('Status: ${presignedResponse.statusCode}');
+        logger.e('Response: ${presignedResponse.data}');
+        throw Exception('Failed to get presigned URL: ${presignedResponse.statusCode}');
       }
 
       final presignedUrl = presignedResponse.data['data']['uploadUrl'];
       final s3Url = presignedResponse.data['data']['fileUrl'];
       final s3KeyResponse = presignedResponse.data['data']['s3Key'];
+      
+      logger.i('✅ Presigned URL received');
 
       // Step 2: Upload file to S3 using presigned URL
       final bytes = await photoFile.readAsBytes();

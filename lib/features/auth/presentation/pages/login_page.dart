@@ -3,6 +3,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:nurse_app/core/navigation/app_router.dart';
 import 'package:nurse_app/features/auth/presentation/bloc/auth_bloc.dart';
 
+class TestUser {
+  final String name;
+  final String email;
+  final String password;
+  final String role;
+  final String emoji;
+  
+  TestUser(this.name, this.email, this.password, this.role, this.emoji);
+}
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -15,9 +25,17 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  // Mock credentials for demo
-  static const String _mockEmail = 'anna.virtanen@nursinghome.fi';
-  static const String _mockPassword = 'password123';
+  // Test users for dropdown
+  final List<TestUser> _testUsers = [
+    TestUser('Anna Virtanen', 'anna.virtanen@hoitokoti.fi', 'nursing123', 'NURSE', '👩‍⚕️'),
+    TestUser('Maria Nieminen', 'maria.nieminen@hoitokoti.fi', 'nursing123', 'HEAD_NURSE', '👩‍⚕️'),
+    TestUser('Jukka Mäkinen', 'jukka.makinen@hoitokoti.fi', 'nursing123', 'DOCTOR', '👨‍⚕️'),
+    TestUser('Liisa Korhonen', 'liisa.korhonen@hoitokoti.fi', 'nursing123', 'PRAC_NURSE', '👩‍⚕️'),
+    TestUser('Pekka Laine', 'pekka.laine@hoitokoti.fi', 'nursing123', 'PHYSIO', '🏃‍♂️'),
+    TestUser('Kaisa Järvinen', 'kaisa.jarvinen@hoitokoti.fi', 'nursing123', 'PSYCHO', '🧠'),
+  ];
+  
+  TestUser? _selectedUser;
 
   @override
   void dispose() {
@@ -37,10 +55,11 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _fillMockCredentials() {
+  void _fillCredentials(TestUser user) {
     setState(() {
-      _emailController.text = _mockEmail;
-      _passwordController.text = _mockPassword;
+      _emailController.text = user.email;
+      _passwordController.text = user.password;
+      _selectedUser = user;
     });
   }
 
@@ -65,14 +84,14 @@ class _LoginPageState extends State<LoginPage> {
           }
         },
         child: SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
             child: Form(
               key: _formKey,
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const SizedBox(height: 40),
                   Icon(
                     Icons.local_hospital,
                     size: 80,
@@ -133,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  // Demo credentials section
+                  // Test users section
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -146,11 +165,11 @@ class _LoginPageState extends State<LoginPage> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.info_outline, 
+                            Icon(Icons.people_outline, 
                               color: Colors.blue.shade700, size: 20),
                             const SizedBox(width: 8),
                             Text(
-                              'Demo Credentials',
+                              'Quick Login - Test Users',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: Colors.blue.shade700,
@@ -158,36 +177,45 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Email: $_mockEmail',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue.shade600,
-                            fontFamily: 'monospace',
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<TestUser>(
+                          value: _selectedUser,
+                          decoration: const InputDecoration(
+                            labelText: 'Select Test User',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           ),
+                          items: _testUsers.map((user) {
+                            return DropdownMenuItem<TestUser>(
+                              value: user,
+                              child: Text('${user.emoji} ${user.name} (${user.role.replaceAll('_', ' ')})'),
+                            );
+                          }).toList(),
+                          onChanged: (TestUser? user) {
+                            if (user != null) {
+                              _fillCredentials(user);
+                            }
+                          },
                         ),
-                        Text(
-                          'Password: $_mockPassword',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue.shade600,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: _fillMockCredentials,
-                            icon: const Icon(Icons.auto_fix_high, size: 16),
-                            label: const Text('Use Demo Credentials'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.blue.shade700,
-                              side: BorderSide(color: Colors.blue.shade300),
+                        if (_selectedUser != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Email: ${_selectedUser!.email}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue.shade600,
+                              fontFamily: 'monospace',
                             ),
                           ),
-                        ),
+                          Text(
+                            'Password: ${_selectedUser!.password}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue.shade600,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -205,6 +233,7 @@ class _LoginPageState extends State<LoginPage> {
                       );
                     },
                   ),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),

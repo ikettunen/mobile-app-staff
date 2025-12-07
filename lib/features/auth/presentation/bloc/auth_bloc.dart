@@ -1,5 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import '../../../../services/auth_service.dart';
+import '../../../../main.dart';
 
 // Events
 abstract class AuthEvent extends Equatable {
@@ -39,11 +41,13 @@ class AuthAuthenticated extends AuthState {
   final String userId;
   final String email;
   final String name;
+  final String token;
+  final String? staffId;
   
-  const AuthAuthenticated(this.userId, this.email, this.name);
+  const AuthAuthenticated(this.userId, this.email, this.name, this.token, {this.staffId});
   
   @override
-  List<Object?> get props => [userId, email, name];
+  List<Object?> get props => [userId, email, name, token, staffId];
 }
 
 class AuthUnauthenticated extends AuthState {}
@@ -59,13 +63,10 @@ class AuthError extends AuthState {
 
 // BLoC
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
-  // Mock credentials for demo
-  static const String _mockEmail = 'anna.virtanen@nursinghome.fi';
-  static const String _mockPassword = 'password123';
-  static const String _mockUserId = 'nurse_001';
-  static const String _mockUserName = 'Anna Virtanen';
+  final AuthService _authService = AuthService();
 
   AuthBloc() : super(AuthInitial()) {
+    _authService.initialize();
     on<CheckAuthStatus>(_onCheckAuthStatus);
     on<LoginRequested>(_onLoginRequested);
     on<LogoutRequested>(_onLogoutRequested);
@@ -74,11 +75,27 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   void _onCheckAuthStatus(CheckAuthStatus event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      // TODO: Implement actual auth check
-      await Future.delayed(const Duration(seconds: 1)); // Simulate API call
-      // For demo purposes, assume user is not authenticated
-      emit(AuthUnauthenticated());
+      // Check if we have stored auth data
+      final hasStoredAuth = await _authService.loadStoredAuthData();
+      
+      if (hasStoredAuth && _authService.isAuthenticated) {
+        final user = _authService.currentUser;
+        if (user != null) {
+          emit(AuthAuthenticated(
+            _authService.currentUserId ?? 'unknown',
+            user['email'] ?? 'unknown@example.com',
+            '${user['firstName'] ?? ''} ${user['lastName'] ?? ''}',
+            _authService.currentToken ?? '',
+            staffId: user['staffId'],
+          ));
+        } else {
+          emit(AuthUnauthenticated());
+        }
+      } else {
+        emit(AuthUnauthenticated());
+      }
     } catch (e) {
+      logger.e('Failed to check auth status: $e');
       emit(AuthError('Failed to check auth status: $e'));
     }
   }
@@ -86,27 +103,39 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   void _onLoginRequested(LoginRequested event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      await Future.delayed(const Duration(seconds: 1)); // Simulate API call
+      logger.i('Attempting login for: ${event.email}');
       
-      // Check mock credentials
-      if (event.email == _mockEmail && event.password == _mockPassword) {
-        emit(AuthAuthenticated(_mockUserId, _mockEmail, _mockUserName));
+      final authData = await _authService.login(event.email, event.password);
+      
+      if (authData != null) {
+        final user = authData['user'];
+        final token = authData['token'];
+        
+        emit(AuthAuthenticated(
+          user['id'] ?? user['_id'] ?? 'unknown',
+          user['email'] ?? event.email,
+          '${user['firstName'] ?? ''} ${user['lastName'] ?? ''}',
+          token,
+          staffId: user['staffId'],
+        ));
+        
+        logger.i('Login successful via AuthBloc');
       } else {
-        // For demo purposes, also accept any email/password combination
-        // In production, this would be removed
-        emit(AuthAuthenticated('demo_user', event.email, 'Demo User'));
+        emit(AuthError('Invalid email or password'));
       }
     } catch (e) {
+      logger.e('Login failed in AuthBloc: $e');
       emit(AuthError('Failed to login: $e'));
     }
   }
 
   void _onLogoutRequested(LogoutRequested event, Emitter<AuthState> emit) async {
     try {
-      // TODO: Implement actual logout
-      await Future.delayed(const Duration(milliseconds: 500)); // Simulate API call
+      await _authService.logout();
       emit(AuthUnauthenticated());
+      logger.i('Logout successful via AuthBloc');
     } catch (e) {
+      logger.e('Logout failed in AuthBloc: $e');
       emit(AuthError('Failed to logout: $e'));
     }
   }

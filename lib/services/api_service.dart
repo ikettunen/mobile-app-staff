@@ -6,6 +6,9 @@ class ApiService {
   static const String apiGatewayUrl = 'http://51.20.164.143:3001/api';
   
   late final Dio _dio;
+  
+  // Expose dio for direct access when needed
+  Dio get dio => _dio;
 
   ApiService() {
     _dio = Dio(BaseOptions(
@@ -69,6 +72,37 @@ class ApiService {
     }
   }
 
+  // Get active visits for a specific nurse
+  Future<List<Visit>> getNurseActiveVisits(String nurseId) async {
+    try {
+      logger.i('Fetching active visits for nurse: $nurseId');
+      final now = DateTime.now();
+      final startOfDay = DateTime(now.year, now.month, now.day);
+      final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      
+      final response = await _dio.get(
+        '/visits/nurse/$nurseId/active',
+        queryParameters: {
+          'date_from': startOfDay.toIso8601String(),
+          'date_to': endOfDay.toIso8601String(),
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        final List<dynamic> visitsJson = data['data'] ?? [];
+        logger.i('Received ${visitsJson.length} visits for nurse $nurseId');
+        return visitsJson.map((json) => Visit.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to load nurse visits: ${response.statusCode}');
+      }
+    } catch (e) {
+      logger.e('Error fetching nurse visits: $e');
+      // Return filtered mock data for the nurse
+      return _getMockVisits().where((v) => v.nurseId == nurseId).toList();
+    }
+  }
+
   // Get visits by patient ID
   Future<List<Visit>> getPatientVisits(String patientId) async {
     try {
@@ -85,6 +119,25 @@ class ApiService {
     } catch (e) {
       logger.e('Error fetching patient visits: $e');
       return [];
+    }
+  }
+
+  // Get a single visit by ID with full details including tasks
+  Future<Map<String, dynamic>?> getVisitById(String visitId) async {
+    try {
+      logger.i('Fetching visit details for: $visitId');
+      final response = await _dio.get('/visits/$visitId');
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        logger.i('Received visit data with ${data['data']?['taskCompletions']?.length ?? 0} tasks');
+        return data['data'];
+      } else {
+        throw Exception('Failed to load visit: ${response.statusCode}');
+      }
+    } catch (e) {
+      logger.e('Error fetching visit by ID: $e');
+      return null;
     }
   }
 
@@ -199,6 +252,69 @@ class ApiService {
       logger.e('Error saving recording to visit: $e');
       // For now, return true to simulate success
       return true;
+    }
+  }
+
+  // Complete a task within a visit
+  Future<bool> completeTask({
+    required String visitId,
+    required String taskId,
+    required String staffId,
+    String? staffName,
+    String? notes,
+  }) async {
+    try {
+      logger.i('Completing task $taskId in visit $visitId by staff $staffId');
+      final response = await _dio.put(
+        '/visits/$visitId/tasks/$taskId/complete',
+        data: {
+          'staffId': staffId,
+          if (staffName != null) 'staffName': staffName,
+          if (notes != null) 'notes': notes,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        logger.i('Task $taskId completed successfully');
+        return true;
+      } else {
+        throw Exception('Failed to complete task: ${response.statusCode}');
+      }
+    } catch (e) {
+      logger.e('Error completing task: $e');
+      return false;
+    }
+  }
+
+  // Add a note to a visit (appends to existing notes)
+  Future<bool> addNoteToVisit({
+    required String visitId,
+    required String noteText,
+    required String staffId,
+    String? staffName,
+    String noteType = 'general',
+  }) async {
+    try {
+      logger.i('Adding note to visit $visitId by staff $staffId');
+      final response = await _dio.post(
+        '/visits/$visitId/notes',
+        data: {
+          'noteText': noteText,
+          'staffId': staffId,
+          if (staffName != null) 'staffName': staffName,
+          'noteType': noteType,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        logger.i('Note added to visit $visitId successfully');
+        return true;
+      } else {
+        throw Exception('Failed to add note: ${response.statusCode}');
+      }
+    } catch (e) {
+      logger.e('Error adding note to visit: $e');
+      return false;
     }
   }
 

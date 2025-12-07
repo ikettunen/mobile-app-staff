@@ -25,6 +25,15 @@ class LoadAllVisits extends VisitEvent {
   const LoadAllVisits();
 }
 
+class LoadNurseVisits extends VisitEvent {
+  final String nurseId;
+  
+  const LoadNurseVisits(this.nurseId);
+  
+  @override
+  List<Object?> get props => [nurseId];
+}
+
 class CreateVisit extends VisitEvent {
   final domain.Visit visit;
   
@@ -80,6 +89,7 @@ class VisitBloc extends Bloc<VisitEvent, VisitState> {
   VisitBloc() : super(VisitInitial()) {
     on<LoadVisits>(_onLoadVisits);
     on<LoadAllVisits>(_onLoadAllVisits);
+    on<LoadNurseVisits>(_onLoadNurseVisits);
     on<CreateVisit>(_onCreateVisit);
     on<UpdateVisit>(_onUpdateVisit);
   }
@@ -111,6 +121,9 @@ class VisitBloc extends Bloc<VisitEvent, VisitState> {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       )).toList();
+      
+      // Sort visits by scheduled time (oldest first)
+      domainVisits.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
       
       logger.i('Loaded ${domainVisits.length} visits');
       emit(VisitLoaded(domainVisits));
@@ -149,12 +162,55 @@ class VisitBloc extends Bloc<VisitEvent, VisitState> {
         updatedAt: DateTime.now(),
       )).toList();
       
+      // Sort visits by scheduled time (oldest first)
+      domainVisits.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+      
       logger.i('VisitBloc: Successfully converted to ${domainVisits.length} domain visits');
       logger.i('VisitBloc: Emitting VisitLoaded state with visits');
       emit(VisitLoaded(domainVisits));
     } catch (e) {
       logger.e('VisitBloc: Error loading visits: $e');
       emit(VisitError('Failed to load visits: $e'));
+    }
+  }
+
+  void _onLoadNurseVisits(LoadNurseVisits event, Emitter<VisitState> emit) async {
+    emit(VisitLoading());
+    try {
+      logger.i('VisitBloc: Starting to load visits for nurse ${event.nurseId}...');
+      final apiVisits = await _apiService.getNurseActiveVisits(event.nurseId);
+      logger.i('VisitBloc: Received ${apiVisits.length} visits for nurse ${event.nurseId}');
+      
+      // Convert API visits to domain visits
+      final domainVisits = apiVisits.map((apiVisit) => domain.Visit(
+        id: apiVisit.id,
+        patientId: apiVisit.patientId,
+        patientName: apiVisit.patientName ?? 'Unknown Patient',
+        nurseId: apiVisit.nurseId ?? '',
+        nurseName: apiVisit.nurseName ?? '',
+        status: _mapApiStatusToVisitStatus(apiVisit.status),
+        scheduledTime: apiVisit.scheduledTime ?? DateTime.now(),
+        startTime: apiVisit.startTime,
+        endTime: apiVisit.endTime,
+        location: apiVisit.location,
+        notes: apiVisit.notes,
+        taskCompletions: const [],
+        vitalSigns: null,
+        audioRecordingPath: null,
+        hasAudioRecording: false,
+        photos: const [],
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      )).toList();
+      
+      // Sort visits by scheduled time (oldest first)
+      domainVisits.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+      
+      logger.i('VisitBloc: Successfully converted to ${domainVisits.length} domain visits for nurse');
+      emit(VisitLoaded(domainVisits));
+    } catch (e) {
+      logger.e('VisitBloc: Error loading nurse visits: $e');
+      emit(VisitError('Failed to load nurse visits: $e'));
     }
   }
 

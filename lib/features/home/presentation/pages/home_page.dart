@@ -8,7 +8,6 @@ import 'package:nurse_app/features/dashboard/presentation/pages/dashboard_page.d
 import 'package:nurse_app/features/visits/presentation/pages/visit_list_page.dart';
 import 'package:nurse_app/features/visits/presentation/bloc/visit_bloc.dart';
 import 'package:nurse_app/features/auth/presentation/bloc/auth_bloc.dart';
-import '../../../../services/api_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});

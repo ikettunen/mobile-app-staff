@@ -29,11 +29,11 @@ class EnvironmentConfig {
   static String get s3BucketName {
     switch (_currentEnvironment) {
       case Environment.development:
-        return 'nursing-app-dev-bucket';
+        return 'nursing-home-audio-recordings-20251124';
       case Environment.staging:
-        return 'nursing-app-staging-bucket';
+        return 'nursing-home-audio-recordings-20251124';
       case Environment.production:
-        return 'nursing-app-prod-bucket';
+        return 'nursing-home-audio-recordings-20251124';
     }
   }
   

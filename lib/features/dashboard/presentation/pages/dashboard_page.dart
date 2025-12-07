@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../services/api_service.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -14,11 +13,11 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final ApiService _apiService = ApiService();
   
-  // Mock data - in real app this would come from API
-  int totalPatients = 45;
-  int todayVisits = 12;
-  int completedTasks = 8;
-  int pendingTasks = 4;
+  int totalPatients = 0;
+  int todayVisits = 0;
+  int completedTasks = 0;
+  int pendingTasks = 0;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -26,9 +25,36 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadDashboardData();
   }
 
-  void _loadDashboardData() async {
-    // TODO: Load real data from API
-    // For now using mock data
+  Future<void> _loadDashboardData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Fetch all data in parallel
+      final results = await Future.wait([
+        _apiService.getPatients(),
+        _apiService.getTodaysVisits(),
+        _apiService.getAllTasks(),
+      ]);
+
+      final patients = results[0] as List<Patient>;
+      final visits = results[1] as List<Visit>;
+      final tasks = results[2] as List<TaskItem>;
+
+      setState(() {
+        totalPatients = patients.length;
+        todayVisits = visits.length;
+        completedTasks = tasks.where((task) => task.completed).length;
+        pendingTasks = tasks.where((task) => !task.completed).length;
+        _isLoading = false;
+      });
+    } catch (e) {
+      // If API fails, keep showing 0s
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -36,12 +62,14 @@ class _DashboardPageState extends State<DashboardPage> {
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () async {
-          _loadDashboardData();
+          await _loadDashboardData();
         },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Welcome Section

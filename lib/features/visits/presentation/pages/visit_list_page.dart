@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:nurse_app/core/navigation/app_router.dart';
 import 'package:nurse_app/features/visits/presentation/bloc/visit_bloc.dart';
 import 'package:nurse_app/features/visits/domain/entities/visit.dart';
-import '../../../../services/api_service.dart';
+import 'package:nurse_app/features/auth/presentation/bloc/auth_bloc.dart';
 import '../../../../main.dart';
 
 class VisitListPage extends StatefulWidget {
@@ -14,12 +14,27 @@ class VisitListPage extends StatefulWidget {
 }
 
 class _VisitListPageState extends State<VisitListPage> {
+  bool _showOnlyMyVisits = true; // Default to showing only assigned visits
+
   @override
   void initState() {
     super.initState();
-    // Load all visits for today
-    logger.i('VisitListPage: Triggering LoadAllVisits event');
-    context.read<VisitBloc>().add(const LoadAllVisits());
+    // Load visits based on filter
+    _loadVisits();
+  }
+
+  void _loadVisits() {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated && _showOnlyMyVisits) {
+      // Use staff-{staffId} format to match database
+      final staffId = authState.staffId ?? '1001'; // Default to 1001 if not available
+      final nurseId = 'staff-$staffId';
+      logger.i('VisitListPage: Loading visits for nurse $nurseId');
+      context.read<VisitBloc>().add(LoadNurseVisits(nurseId));
+    } else {
+      logger.i('VisitListPage: Loading all visits');
+      context.read<VisitBloc>().add(const LoadAllVisits());
+    }
   }
 
   @override
@@ -30,20 +45,51 @@ class _VisitListPageState extends State<VisitListPage> {
           // Header
           Container(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Today\'s Visits',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Today\'s Visits',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _loadVisits,
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () {
-                    context.read<VisitBloc>().add(const LoadAllVisits());
-                  },
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _showOnlyMyVisits ? 'My Visits' : 'All Visits',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: _showOnlyMyVisits,
+                      onChanged: (value) {
+                        setState(() {
+                          _showOnlyMyVisits = value;
+                        });
+                        _loadVisits();
+                      },
+                      activeColor: Colors.blue,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Only My Visits',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -78,7 +124,7 @@ class _VisitListPageState extends State<VisitListPage> {
                   }
                   return RefreshIndicator(
                     onRefresh: () async {
-                      context.read<VisitBloc>().add(const LoadAllVisits());
+                      _loadVisits();
                     },
                     child: ListView.builder(
                       itemCount: state.visits.length,
@@ -103,13 +149,12 @@ class _VisitListPageState extends State<VisitListPage> {
                               children: [
                                 if (visit.location != null)
                                   Text('Room: ${visit.location}'),
-                                if (visit.scheduledTime != null)
-                                  Text(
-                                    'Time: ${_formatTime(visit.scheduledTime!)}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                                Text(
+                                  _formatDateTime(visit.scheduledTime),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
                                   ),
+                                ),
                                 Text('Status: ${visit.status.name}'),
                               ],
                             ),
@@ -140,9 +185,7 @@ class _VisitListPageState extends State<VisitListPage> {
                       children: [
                         Text('Error: ${state.message}'),
                         ElevatedButton(
-                          onPressed: () {
-                            context.read<VisitBloc>().add(const LoadAllVisits());
-                          },
+                          onPressed: _loadVisits,
                           child: const Text('Retry'),
                         ),
                       ],
@@ -188,8 +231,22 @@ class _VisitListPageState extends State<VisitListPage> {
     }
   }
 
-  String _formatTime(DateTime dateTime) {
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  String _formatDateTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final visitDate = DateTime(dateTime.year, dateTime.month, dateTime.day);
+    
+    final time = '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    
+    if (visitDate == today) {
+      return 'Today $time';
+    } else if (visitDate == today.add(const Duration(days: 1))) {
+      return 'Tomorrow $time';
+    } else if (visitDate == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday $time';
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year} $time';
+    }
   }
 
   void _startVisit(visit) {
